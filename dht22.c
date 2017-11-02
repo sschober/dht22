@@ -1,4 +1,5 @@
 #include <wiringPi.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -69,7 +70,7 @@ void dht11_read_val(){
     // top 3 transistions are ignored
     if((i>=4)&&(i%2==0)){
       if( j % 8 == 0 ){
-        fprintf(stderr, "\n");
+        // fprintf(stderr, "\n");
       }
       dht11_val[j/8]<<=1;
       if(counter>60){
@@ -77,24 +78,34 @@ void dht11_read_val(){
       }
       j++;
     }
-      fprintf(stderr, " %02d", counter);
+    // fprintf(stderr, " %02d", counter);
   }
 
-  fprintf(stderr, "\ni=%d, j=%d\n",i, j);
+  // fprintf(stderr, "\ni=%d, j=%d\n",i, j);
   // verify cheksum and print the verified data
   if( j>=39
       &&(dht11_val[4]==((dht11_val[0]+dht11_val[1]+dht11_val[2]+dht11_val[3])& 0xFF))
     ){
-    printf("Humidity = %f %% Temperature = %f °C\n", (256 * (float) dht11_val[0] + (float) dht11_val[1] )/10.0, (256 * (float) (dht11_val[2] & 0x7F) + (float) dht11_val[3])/10.0);
+
+    time_t t;
+    struct tm *tmp;
+    char timeStr[200];
+
+    t = time(NULL);
+    tmp = localtime(&t);
+    if( tmp != NULL && strftime(timeStr, sizeof(timeStr), "%F;%T", tmp) != 0 ){
+      printf("%s;%.1f;%.1f\n", timeStr, (256 * (float) dht11_val[0] + (float) dht11_val[1] )/10.0, (256 * (float) (dht11_val[2] & 0x7F) + (float) dht11_val[3])/10.0);
+    }
   }
   else{
-    printf("Invalid Data!!\n");
+    // we just ignore the invalid run
+    // printf("Invalid Data!!\n");
   }
 }
 
 int main(void){
 
-  printf("Interfacing Temperature and Humidity Sensor (DHT11) With Banana Pi\n");
+  // printf("Interfacing Temperature and Humidity Sensor (DHT11) With Banana Pi\n");
 
   if(wiringPiSetup()==-1)
     exit(1);
