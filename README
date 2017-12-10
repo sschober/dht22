@@ -24,18 +24,19 @@ Invocation
 
 `dht22` can be invoked as following:
 
-    dht22 [<read delay in ms> [<number of retries>]]
+    dht22 [<read delay in ms> [<number of retries> [<retry delay in ms]]]
 
 A sample invocation might look like this:
 
     dht22
 
-Which would trigger default values for read delay and number of
-retries. Another sample invocation might be:
+Which would trigger default values for read and retry delay and
+number of retries. Another sample invocation might be:
 
-    dht22 60000 3
+    dht22 60000 10 600
 
-which would try to aquire a reading every minute, with 3 retries.
+which would try to aquire a reading every minute, with 3 retries and
+a retry delay of 600ms.
 
 
 Build

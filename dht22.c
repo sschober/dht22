@@ -6,25 +6,10 @@
 #include <stdbool.h>
 
 #define MAX_TIME 85
-#define DHT11PIN 0
+#define DHT22PIN 0
 
 #define INITIAL_HOLD_LOW 18
 #define INITIAL_HOLD_HIGH 40
-
-
-/**
- * Helper function that prints state transitions in an ASCII
- * inspired format.
- */
-void print_state_transition(uint8_t old_state, uint8_t new_state, uint8_t time){
-
-  if( old_state == LOW && new_state == HIGH ){
-    fprintf(stderr, "_%d/¯", time);
-  } else if( old_state == HIGH && new_state == LOW ){
-    fprintf(stderr, "¯%d\\_", time);
-  }
-
-}
 
 uint8_t checksum(uint8_t rh_int, uint8_t rh_dec, uint8_t t_int, uint8_t t_dec){
   uint32_t sum = rh_int;
@@ -55,20 +40,20 @@ bool dht22_read_val( sensor_reading *sr ){
      dht22_val[i]=0;
   }
 
-  pinMode(DHT11PIN,OUTPUT);
+  pinMode(DHT22PIN,OUTPUT);
 
-  digitalWrite(DHT11PIN,LOW);
+  digitalWrite(DHT22PIN,LOW);
   delay(INITIAL_HOLD_LOW);
 
-  digitalWrite(DHT11PIN,HIGH);
+  digitalWrite(DHT22PIN,HIGH);
   delayMicroseconds(INITIAL_HOLD_HIGH);
 
-  pinMode(DHT11PIN,INPUT);
+  pinMode(DHT22PIN,INPUT);
 
   for(i=0;i<MAX_TIME;i++){
     counter=0;
     // this is supposed to be edge detection
-    while(digitalRead(DHT11PIN)==lst_state){
+    while(digitalRead(DHT22PIN)==lst_state){
       counter++;
       delayMicroseconds(1);
       if(counter==255){
@@ -76,8 +61,7 @@ bool dht22_read_val( sensor_reading *sr ){
       }
     }
     old_state = lst_state;
-    lst_state=digitalRead(DHT11PIN);
-    //print_state_transition( old_state, lst_state, counter );
+    lst_state=digitalRead(DHT22PIN);
 
     if(counter==255){
        break; // we waited to long
@@ -85,19 +69,17 @@ bool dht22_read_val( sensor_reading *sr ){
 
     // top 3 transistions are ignored
     if((i>=4)&&(i%2==0)){
-      if( j % 8 == 0 ){
-        // fprintf(stderr, "\n");
-      }
+
       dht22_val[j/8]<<=1;
       if(counter>60){
         dht22_val[j/8]|=1;
       }
       j++;
+
     }
-    // fprintf(stderr, " %02d", counter);
+
   }
 
-  // fprintf(stderr, "\ni=%d, j=%d\n",i, j);
   // verify cheksum and print the verified data
   if( j>=39
       &&(dht22_val[4]==((dht22_val[0]+dht22_val[1]+dht22_val[2]+dht22_val[3])& 0xFF))
@@ -126,12 +108,14 @@ bool dht22_read_val( sensor_reading *sr ){
  * On success 0 is returned and sr contains the timestamp of the
  * reading, humidity and temperature as returned by the sensor.
  */
-int dht22_read_val_with_retries( sensor_reading *sr, uint8_t retries ){
+int dht22_read_val_with_retries( sensor_reading *sr, uint8_t retries, uint16_t retry_delay_ms ){
 
   int result = -1;
 
-  while( 0 < retries && 0 > (result = dht22_read_val( sr ) ) ){
+  while( 0 < retries && false == ( result = dht22_read_val( sr ) ) ){
+    printf( "retrying...\n" );
     retries--;
+    delay( retry_delay_ms );
   }
 
   return result;
@@ -153,8 +137,9 @@ void print_sensor_reading( FILE *stream, sensor_reading *sr ){
 
 int main(int argc, char** argv){
 
-  int read_delay_ms = 3000;
-  int num_retries = 3;
+  uint16_t read_delay_ms = 3000;
+  uint8_t num_retries = 3;
+  uint16_t retry_delay_ms = 500;
 
   if( 1 < argc ){
     read_delay_ms = atoi( argv[1] );
@@ -164,14 +149,20 @@ int main(int argc, char** argv){
     num_retries = atoi( argv[2] );
   }
 
-  if(wiringPiSetup()==-1)
+  if( 3 < argc ){
+    retry_delay_ms = atoi( argv[3] );
+  }
+
+  if(wiringPiSetup()==-1){
+    fprintf( stderr, "error setting up wiring Pi...\n" );
     exit(1);
+  }
 
   while(true){
 
     sensor_reading sr;
 
-    if( dht22_read_val_with_retries( &sr, num_retries ) ){
+    if( dht22_read_val_with_retries( &sr, num_retries, retry_delay_ms ) ){
       FILE *log = fopen("log.csv", "a");
       print_sensor_reading( log, &sr );
       fclose(log);
