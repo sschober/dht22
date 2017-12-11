@@ -5,18 +5,21 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MAX_TIME 85
-#define DHT22PIN 0
+#define MAX_EDGE_TRANSITIONS 85
+#define MAX_HOLD_TIME_MS 255
+#define HOLD_TIME_1 60
+#define DHT22_PIN 0
+#define DHT22_READ_SEGMENT_SIZE 5
 
 #define INITIAL_HOLD_LOW 18
 #define INITIAL_HOLD_HIGH 40
 
-uint8_t checksum(uint8_t rh_int, uint8_t rh_dec, uint8_t t_int, uint8_t t_dec){
-  uint32_t sum = rh_int;
-  sum += rh_dec;
-  sum += t_int;
-  sum += t_dec;
-  return sum & 0xFF;
+bool is_checksum_valid(int *dht22_val){
+  uint32_t sum = dht22_val[0];
+  sum += dht22_val[1];
+  sum += dht22_val[2];
+  sum += dht22_val[3];
+  return (sum & 0xFF) == dht22_val[4];
 }
 
 typedef struct {
@@ -29,60 +32,65 @@ typedef struct {
 
 bool dht22_read_val( sensor_reading *sr ){
 
-  int dht22_val[5]={0,0,0,0,0};
-  uint8_t lst_state=HIGH;
-  uint8_t old_state=HIGH;
-  uint8_t counter=0;
-  uint8_t j=0,i;
+  int dht22_val[DHT22_READ_SEGMENT_SIZE] = { 0, 0, 0, 0, 0 };
+  uint8_t last_state = HIGH;
+  uint8_t edge_transitions_witnessed = 0;
 
   // init dht22_val
-  for(i=0;i<5;i++){
-     dht22_val[i]=0;
+  for(int i = 0; i < DHT22_READ_SEGMENT_SIZE; i++ ){
+     dht22_val[i] = 0;
   }
 
-  pinMode(DHT22PIN,OUTPUT);
+  pinMode(DHT22_PIN,OUTPUT);
 
-  digitalWrite(DHT22PIN,LOW);
+  digitalWrite(DHT22_PIN,LOW);
   delay(INITIAL_HOLD_LOW);
 
-  digitalWrite(DHT22PIN,HIGH);
+  digitalWrite(DHT22_PIN,HIGH);
   delayMicroseconds(INITIAL_HOLD_HIGH);
 
-  pinMode(DHT22PIN,INPUT);
+  pinMode(DHT22_PIN,INPUT);
 
-  for(i=0;i<MAX_TIME;i++){
-    counter=0;
+  for( uint8_t edge_transitions = 0; edge_transitions < MAX_EDGE_TRANSITIONS ; edge_transitions++ ){
+
+    uint8_t hold_time_ms = 0;
+
     // this is supposed to be edge detection
-    while(digitalRead(DHT22PIN)==lst_state){
-      counter++;
+    while( digitalRead(DHT22_PIN) == last_state ){
+
+      hold_time_ms++;
       delayMicroseconds(1);
-      if(counter==255){
+
+      if( hold_time_ms == MAX_HOLD_TIME_MS ){
         break;
       }
-    }
-    old_state = lst_state;
-    lst_state=digitalRead(DHT22PIN);
 
-    if(counter==255){
-       break; // we waited to long
     }
+
+    if( hold_time_ms == MAX_HOLD_TIME_MS ){
+      break;
+    }
+
+    last_state = digitalRead(DHT22_PIN);
 
     // top 3 transistions are ignored
-    if((i>=4)&&(i%2==0)){
+    if( ( edge_transitions >= 4 ) && ( edge_transitions % 2 == 0 ) ){
 
-      dht22_val[j/8]<<=1;
-      if(counter>60){
-        dht22_val[j/8]|=1;
+      dht22_val[edge_transitions_witnessed/8]<<=1;
+
+      if( hold_time_ms > HOLD_TIME_1 ){
+        dht22_val[edge_transitions_witnessed/8]|=1;
       }
-      j++;
+
+      edge_transitions_witnessed++;
 
     }
 
   }
 
   // verify cheksum and print the verified data
-  if( j>=39
-      &&(dht22_val[4]==((dht22_val[0]+dht22_val[1]+dht22_val[2]+dht22_val[3])& 0xFF))
+  if( edge_transitions_witnessed >= 39
+      && is_checksum_valid( dht22_val )
     ){
     // valid run, checksum checks out
 
