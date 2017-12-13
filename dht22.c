@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MAX_EDGE_TRANSITIONS 85
+#define MAX_EDGE_TRANSITIONS 83
 #define MAX_HOLD_TIME_MS 255
 #define HOLD_TIME_1 60
 #define DHT22_PIN 0
@@ -14,12 +14,12 @@
 #define INITIAL_HOLD_LOW 18
 #define INITIAL_HOLD_HIGH 40
 
-bool is_checksum_valid(int *dht22_val){
-  uint32_t sum = dht22_val[0];
-  sum += dht22_val[1];
-  sum += dht22_val[2];
-  sum += dht22_val[3];
-  return (sum & 0xFF) == dht22_val[4];
+bool is_checksum_valid(int *bit_array){
+  uint32_t sum = bit_array[0];
+  sum += bit_array[1];
+  sum += bit_array[2];
+  sum += bit_array[3];
+  return (sum & 0xFF) == bit_array[4];
 }
 
 typedef struct {
@@ -30,16 +30,7 @@ typedef struct {
 
 } sensor_reading;
 
-bool dht22_read_val( sensor_reading *sr ){
-
-  int dht22_val[DHT22_READ_SEGMENT_SIZE] = { 0, 0, 0, 0, 0 };
-  uint8_t last_state = HIGH;
-  uint8_t edge_transitions_witnessed = 0;
-
-  // init dht22_val
-  for(int i = 0; i < DHT22_READ_SEGMENT_SIZE; i++ ){
-     dht22_val[i] = 0;
-  }
+void signal_read_intent(){
 
   pinMode(DHT22_PIN,OUTPUT);
 
@@ -49,9 +40,14 @@ bool dht22_read_val( sensor_reading *sr ){
   digitalWrite(DHT22_PIN,HIGH);
   delayMicroseconds(INITIAL_HOLD_HIGH);
 
-  pinMode(DHT22_PIN,INPUT);
+}
 
-  for( uint8_t edge_transitions = 0; edge_transitions < MAX_EDGE_TRANSITIONS ; edge_transitions++ ){
+uint8_t read_bit_array( int *bit_array ){
+
+  uint8_t last_state = HIGH;
+  uint8_t edge_transitions_witnessed = 0;
+
+  for( uint8_t edge_transitions = 0; edge_transitions < MAX_EDGE_TRANSITIONS; edge_transitions++ ){
 
     uint8_t hold_time_ms = 0;
 
@@ -76,10 +72,10 @@ bool dht22_read_val( sensor_reading *sr ){
     // top 3 transistions are ignored
     if( ( edge_transitions >= 4 ) && ( edge_transitions % 2 == 0 ) ){
 
-      dht22_val[edge_transitions_witnessed/8]<<=1;
+      bit_array[edge_transitions_witnessed/8] <<= 1;
 
       if( hold_time_ms > HOLD_TIME_1 ){
-        dht22_val[edge_transitions_witnessed/8]|=1;
+        bit_array[edge_transitions_witnessed/8] |= 1;
       }
 
       edge_transitions_witnessed++;
@@ -88,22 +84,36 @@ bool dht22_read_val( sensor_reading *sr ){
 
   }
 
+  return edge_transitions_witnessed;
+
+}
+
+bool acquire_sensor_reading( sensor_reading *sr ){
+
+  int bit_array[DHT22_READ_SEGMENT_SIZE] = { 0, 0, 0, 0, 0 };
+  uint8_t bit_array_read = 0;
+
+  signal_read_intent();
+
+  pinMode(DHT22_PIN,INPUT);
+
+  bit_array_read = read_bit_array( bit_array );
+
   // verify cheksum and print the verified data
-  if( edge_transitions_witnessed >= 39
-      && is_checksum_valid( dht22_val )
+  if( bit_array_read >= 39
+      && is_checksum_valid( bit_array )
     ){
     // valid run, checksum checks out
 
     sr->time = time(NULL);
-    sr->humidity = (256 * (float) dht22_val[0] + (float) dht22_val[1] )/10.0;
-    sr->temperature = (256 * (float) (dht22_val[2] & 0x7F) + (float) dht22_val[3])/10.0;
+    sr->humidity = (256 * (float) bit_array[0] + (float) bit_array[1] )/10.0;
+    sr->temperature = (256 * (float) (bit_array[2] & 0x7F) + (float) bit_array[3])/10.0;
 
     return true;
+
   }
-  else{
-    // invalid run
-    return false;
-  }
+  // invalid run
+  return false;
 }
 
 /**
@@ -116,11 +126,11 @@ bool dht22_read_val( sensor_reading *sr ){
  * On success 0 is returned and sr contains the timestamp of the
  * reading, humidity and temperature as returned by the sensor.
  */
-int dht22_read_val_with_retries( sensor_reading *sr, uint8_t retries, uint16_t retry_delay_ms ){
+int acquire_sensor_reading_with_retries( sensor_reading *sr, uint8_t retries, uint16_t retry_delay_ms ){
 
-  int result = -1;
+  bool result = false;
 
-  while( 0 < retries && false == ( result = dht22_read_val( sr ) ) ){
+  while( 0 < retries && ! ( result = acquire_sensor_reading( sr ) ) ){
     printf( "retrying...\n" );
     retries--;
     delay( retry_delay_ms );
@@ -170,10 +180,12 @@ int main(int argc, char** argv){
 
     sensor_reading sr;
 
-    if( dht22_read_val_with_retries( &sr, num_retries, retry_delay_ms ) ){
+    if( acquire_sensor_reading_with_retries( &sr, num_retries, retry_delay_ms ) ){
+
       FILE *log = fopen("log.csv", "a");
       print_sensor_reading( log, &sr );
       fclose(log);
+
     }
 
     delay(read_delay_ms);
